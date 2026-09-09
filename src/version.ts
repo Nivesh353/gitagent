@@ -56,6 +56,7 @@ export type VersionErrorCode =
 	| "DIRTY_CONFIG"
 	| "INDEX_DIRTY"
 	| "DETACHED_HEAD"
+	| "RESTORE_FAILED"
 	| "COMMIT_FAILED";
 
 export class VersionError extends Error {
@@ -385,7 +386,6 @@ export function planRollback(ctx: VersionContext, name: string): RollbackPlan {
 
 export interface RollbackOptions {
 	message?: string;
-	force?: boolean;
 }
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -405,11 +405,24 @@ export function applyRollback(
 
 	// Remove before restore: if a config path was a file at the tag and is a directory
 	// now (or vice versa), checking out first fails with "Not a directory".
-	for (const paths of chunk(plan.remove, 500)) {
-		gitWrite(ctx.root, ["rm", "-q", "-f", "--", ...paths]);
-	}
-	for (const paths of chunk(plan.restore, 500)) {
-		gitWrite(ctx.root, ["checkout", tagRef(plan.name), "--", ...paths]);
+	//
+	// A failure here leaves the plan half-applied and staged but NOT committed, which
+	// is a different recovery story from a failed commit — hence the separate error.
+	try {
+		for (const paths of chunk(plan.remove, 500)) {
+			gitWrite(ctx.root, ["rm", "-q", "-f", "--", ...paths]);
+		}
+		for (const paths of chunk(plan.restore, 500)) {
+			gitWrite(ctx.root, ["checkout", tagRef(plan.name), "--", ...paths]);
+		}
+	} catch (err: any) {
+		throw new VersionError(
+			"RESTORE_FAILED",
+			`Rollback failed partway through: ${err?.message ?? err}\n` +
+				"Config files were partially modified and nothing was committed. " +
+				"Run 'git status' to inspect, then 'git reset --hard HEAD' to recover " +
+				"(note that also discards any other uncommitted changes, including memory/).",
+		);
 	}
 
 	const subject = opts.message || `rollback config to ${plan.name}`;
@@ -423,9 +436,10 @@ export function applyRollback(
 	} catch (err: any) {
 		throw new VersionError(
 			"COMMIT_FAILED",
-			`Config was restored but the commit failed: ${err?.message ?? err}\n` +
-				"Changes are staged but not committed. Run 'git commit' to finish, " +
-				"or 'git reset --hard HEAD' to discard.",
+			`Config was fully restored but the commit failed: ${err?.message ?? err}\n` +
+				"The complete rollback is staged. Run 'git commit' to finish it, or " +
+				"'git reset --hard HEAD' to discard it (that also discards any other " +
+				"uncommitted changes, including memory/).",
 		);
 	}
 

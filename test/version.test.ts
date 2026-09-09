@@ -300,6 +300,22 @@ describe("applyRollback", () => {
 		await cleanup(root);
 	});
 
+	it("refuses to roll back when the index already has staged changes", async () => {
+		const { root, agentDir } = await makeAgentRepo();
+		const ctx = v.resolveContext(agentDir);
+		v.saveVersion(ctx, { name: "v1" });
+
+		// Staged memory/ would otherwise be swept into the rollback commit.
+		await writeFile(join(agentDir, "memory", "MEMORY.md"), "staged\n", "utf-8");
+		raw(root, "add", "memory/MEMORY.md");
+
+		expectCode(() => v.assertRollbackReady(ctx, false), "INDEX_DIRTY");
+		// --force covers dirty config and detached HEAD, but never a dirty index.
+		expectCode(() => v.assertRollbackReady(ctx, true), "INDEX_DIRTY");
+
+		await cleanup(root);
+	});
+
 	it("refuses to roll back on a detached HEAD unless forced", async () => {
 		const { root, agentDir } = await makeAgentRepo();
 		const ctx = v.resolveContext(agentDir);

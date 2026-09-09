@@ -150,6 +150,8 @@ function handleDiff(agentDir: string, args: string[]): void {
 		return;
 	}
 	console.log(dim(`${a} → ${b ?? "working tree"}`));
+	// Exit status is intentionally ignored: git diff exits 1 when differences exist,
+	// and hasConfigDiff above already established that there are some.
 	gitStream(ctx.root, buildDiffArgs(ctx, a, b, extra));
 }
 
@@ -197,7 +199,8 @@ async function handleRollback(agentDir: string, args: string[]): Promise<void> {
 		}
 	}
 
-	const result = applyRollback(ctx, plan, { message: flagValue(args, "-m", "--message"), force });
+	// force is consumed by assertRollbackReady above; applyRollback has no use for it.
+	const result = applyRollback(ctx, plan, { message: flagValue(args, "-m", "--message") });
 	console.log(`${green("Rolled back config to")} ${bold(name)}`);
 	console.log(
 		dim(`restored ${result.restored} file(s) · removed ${result.removed} file(s) · new commit ${result.commit}`),
